@@ -6,14 +6,15 @@ import velox.api.layer1.data.TradeInfo;
 import velox.api.layer1.simplified.*;
 import velox.api.layer1.common.Log;
 
-import java.io.OutputStreamWriter;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 @Layer1SimpleAttachable
-@Layer1StrategyName("VP XXXXX")
+@Layer1StrategyName("VP DB")
 @Layer1ApiVersion(Layer1ApiVersionValue.VERSION1)
 public class OnTrade implements CustomModule, TradeDataListener {
 
@@ -36,35 +37,51 @@ public class OnTrade implements CustomModule, TradeDataListener {
     }
 
     private void logVolumeProfile() {
+        String volumeProfileData = buildVolumeProfileData();
+        sendDataToServer(volumeProfileData);
+    }
+
+    private String buildVolumeProfileData() {
+        StringBuilder volumeProfileBuilder = new StringBuilder();
+        for (Entry<Integer, Integer> entry : volumeProfile.entrySet()) {
+            double price = entry.getKey() / 4.0 * 0.25;  // Adjusted conversion back to price
+            int volume = entry.getValue();
+            volumeProfileBuilder.append(String.format("%.2f,%d\n", price, volume));
+        }
+        return volumeProfileBuilder.toString();
+    }
+
+    private void sendDataToServer(String data) {
         try {
-            URL url = new URL("http://localhost:5000/volume_profile");
+            URL url = new URL("http://localhost:8080/volume-profile");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setDoOutput(true);
+
+            // Set the request method to POST
             conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json");
 
-            try (OutputStreamWriter out = new OutputStreamWriter(conn.getOutputStream())) {
-                StringBuilder jsonBuilder = new StringBuilder();
-                jsonBuilder.append("{");
-                for (Entry<Integer, Integer> entry : volumeProfile.entrySet()) {
-                    double price = entry.getKey() / 4.0 * 0.25;  // Adjusted conversion back to price
-                    int volume = entry.getValue();
-                    jsonBuilder.append(String.format("\"%.2f\": %d,", price, volume));
-                }
-                // Remove trailing comma and close JSON object
-                jsonBuilder.setLength(jsonBuilder.length() - 1);
-                jsonBuilder.append("}");
+            // Enable input and output streams
+            conn.setDoOutput(true);
 
-                out.write(jsonBuilder.toString());
+            // Write the data to the request body
+            try (OutputStream os = conn.getOutputStream()) {
+                byte[] input = data.getBytes("utf-8");
+                os.write(input, 0, input.length);
             }
 
-            int responseCode = conn.getResponseCode();
-            if (responseCode != 200) {
-                Log.error("Failed to send volume profile data: " + conn.getResponseMessage());
-            }
-        } catch (Exception e) {
-            Log.error("Failed to send volume profile data", e);
+            checkResponse(conn);
+
+        } catch (IOException e) {
+            Log.error("Failed to send data to HTTP server", e);
+        }
+    }
+
+    private void checkResponse(HttpURLConnection conn) throws IOException {
+        // Get the response code to ensure the request was successful
+        int responseCode = conn.getResponseCode();
+        if(responseCode == HttpURLConnection.HTTP_OK) {
+            Log.info("Data sent successfully.");
+        } else {
+            Log.error("Failed to send data. HTTP response code: " + responseCode);
         }
     }
 }
-
